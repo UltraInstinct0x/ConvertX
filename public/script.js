@@ -3,9 +3,17 @@ const fileInput = document.querySelector('input[type="file"]');
 const dropZone = document.getElementById("dropzone");
 const convertButton = document.querySelector("input[type='submit']");
 const fileNames = [];
+// per-file chosen target: { "filename.ext": "ext,converter" }
+const fileTargets = {};
 let fileType;
 let pendingFiles = 0;
 let formatSelected = false;
+
+const isNewUi = () => document.documentElement.classList.contains("new-ui");
+
+// File-input "accept" used to be locked to the first dropped extension, which
+// silently rejected every other type. Leave it open so the user can mix files.
+// (The backend still validates per-converter, so nothing actually breaks.)
 
 dropZone.addEventListener("dragover", (e) => {
   e.preventDefault();
@@ -21,33 +29,38 @@ dropZone.addEventListener("drop", (e) => {
   dropZone.classList.remove("dragover");
 
   const files = e.dataTransfer.files;
-
   if (files.length === 0) {
     console.warn("No files dropped — likely a URL or unsupported source.");
     return;
   }
-
-  for (const file of files) {
-    console.log("Handling dropped file:", file.name);
-    handleFile(file);
-  }
+  for (const file of files) handleFile(file);
 });
 
-// Extracted handleFile function for reusability in drag-and-drop and file input
+// Build a row. In new-ui mode each row gets its own "Choose format" button
+// which opens a popup scoped to that file's possible targets.
 function handleFile(file) {
   const fileList = document.querySelector("#file-list");
+  const ext = file.name.includes(".") ? file.name.split(".").pop() : "";
+  const safeName = file.name.replaceAll('"', "&quot;");
 
   const row = document.createElement("tr");
+  row.dataset.filename = file.name;
+  row.dataset.ext = ext;
   row.innerHTML = `
     <td>${file.name}</td>
     <td><progress max="100" class="inline-block h-2 appearance-none overflow-hidden rounded-full border-0 bg-neutral-700 bg-none text-accent-500 accent-accent-500 [&::-moz-progress-bar]:bg-accent-500 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:[background:none] [&[value]::-webkit-progress-value]:bg-accent-500 [&[value]::-webkit-progress-value]:transition-[inline-size]"></progress></td>
     <td>${(file.size / 1024).toFixed(2)} kB</td>
+    <td class="per-row-target-cell">
+      <button type="button" class="per-row-target-btn rounded-sm bg-neutral-700 px-2 py-1 text-sm hover:bg-neutral-600" data-filename="${safeName}" data-ext="${ext}">
+        Choose format
+      </button>
+    </td>
     <td><a onclick="deleteRow(this)">Remove</a></td>
   `;
 
+  // Classic flow still needs the global picker populated based on first file.
   if (!fileType) {
-    fileType = file.name.split(".").pop();
-    fileInput.setAttribute("accept", `.${fileType}`);
+    fileType = ext;
     setTitle();
 
     fetch(`${webroot}/conversions`, {
@@ -58,7 +71,7 @@ function handleFile(file) {
       .then((res) => res.text())
       .then((html) => {
         selectContainer.innerHTML = html;
-        updateSearchBar();
+        wireClassicPicker();
       })
       .catch(console.error);
   }
@@ -71,19 +84,21 @@ function handleFile(file) {
 
 const selectContainer = document.querySelector("form .select_container");
 
-const updateSearchBar = () => {
+// ---------- classic picker (untouched behavior, just isolated) ----------
+function wireClassicPicker() {
+  const popup = document.querySelector(".convert-classic-view");
+  if (!popup) return;
   const convertToInput = document.querySelector("input[name='convert_to_search']");
-  const convertToPopup = document.querySelector(".convert_to_popup");
-  const convertToGroupElements = document.querySelectorAll(".convert_to_group");
-  const convertToGroups = {};
   const convertToElement = document.querySelector("select[name='convert_to']");
+  const groupEls = popup.querySelectorAll(".convert_to_group");
+  const convertToGroups = {};
 
   const showMatching = (search) => {
     for (const [targets, groupElement] of Object.values(convertToGroups)) {
-      let matchingTargetsFound = 0;
+      let matches = 0;
       for (const target of targets) {
         if (target.dataset.target.includes(search)) {
-          matchingTargetsFound++;
+          matches++;
           target.classList.remove("hidden");
           target.classList.add("flex");
         } else {
@@ -91,8 +106,7 @@ const updateSearchBar = () => {
           target.classList.remove("flex");
         }
       }
-
-      if (matchingTargetsFound === 0) {
+      if (matches === 0) {
         groupElement.classList.add("hidden");
         groupElement.classList.remove("flex");
       } else {
@@ -102,62 +116,173 @@ const updateSearchBar = () => {
     }
   };
 
-  for (const groupElement of convertToGroupElements) {
+  for (const groupElement of groupEls) {
     const groupName = groupElement.dataset.converter;
-
-    const targetElements = groupElement.querySelectorAll(".target");
-    const targets = Array.from(targetElements);
-
+    const targets = Array.from(groupElement.querySelectorAll(".target"));
     for (const target of targets) {
       target.onmousedown = () => {
         convertToElement.value = target.dataset.value;
         convertToInput.value = `${target.dataset.target} using ${target.dataset.converter}`;
         formatSelected = true;
-        if (pendingFiles === 0 && fileNames.length > 0) {
-          convertButton.disabled = false;
-        }
+        if (pendingFiles === 0 && fileNames.length > 0) convertButton.disabled = false;
         showMatching("");
       };
     }
-
     convertToGroups[groupName] = [targets, groupElement];
   }
 
-  convertToInput.addEventListener("input", (e) => {
-    showMatching(e.target.value.toLowerCase());
-  });
-
+  convertToInput.addEventListener("input", (e) => showMatching(e.target.value.toLowerCase()));
   convertToInput.addEventListener("search", () => {
-    // when the user clears the search bar using the 'x' button
     convertButton.disabled = true;
     formatSelected = false;
   });
-
   convertToInput.addEventListener("blur", (e) => {
-    // Keep the popup open even when clicking on a target button
-    // for a split second to allow the click to go through
     if (e?.relatedTarget?.classList?.contains("target")) {
-      convertToPopup.classList.add("hidden");
-      convertToPopup.classList.remove("flex");
+      popup.classList.add("hidden");
+      popup.classList.remove("flex");
       return;
     }
-
-    convertToPopup.classList.add("hidden");
-    convertToPopup.classList.remove("flex");
+    popup.classList.add("hidden");
+    popup.classList.remove("flex");
   });
-
   convertToInput.addEventListener("focus", () => {
-    convertToPopup.classList.remove("hidden");
-    convertToPopup.classList.add("flex");
+    if (isNewUi()) return; // new-ui uses per-row picker, suppress global popup
+    popup.classList.remove("hidden");
+    popup.classList.add("flex");
   });
-};
+}
 
-// Add a 'change' event listener to the file input element
+// ---------- new-ui per-row picker ----------
+// Cache of {ext -> [{target, converter}, ...]} fetched lazily from /conversions.
+const newUiTargetCache = {};
+
+async function fetchTargetsForExt(ext) {
+  if (newUiTargetCache[ext]) return newUiTargetCache[ext];
+  const res = await fetch(`${webroot}/conversions`, {
+    method: "POST",
+    body: JSON.stringify({ fileType: ext }),
+    headers: { "Content-Type": "application/json" },
+  });
+  const html = await res.text();
+  // Parse out target buttons from returned fragment.
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  const items = Array.from(tmp.querySelectorAll(".target")).map((btn) => ({
+    target: btn.dataset.target,
+    converter: btn.dataset.converter,
+    value: btn.dataset.value,
+  }));
+  newUiTargetCache[ext] = items;
+  return items;
+}
+
+// Single floating popup reused for whichever row was clicked.
+let rowPopup;
+function ensureRowPopup() {
+  if (rowPopup) return rowPopup;
+  rowPopup = document.createElement("div");
+  rowPopup.id = "per-row-popup";
+  rowPopup.className =
+    "fixed z-50 hidden max-h-[60vh] w-[min(28rem,90vw)] overflow-y-auto rounded-sm bg-neutral-800 p-3 shadow-xl border border-neutral-700";
+  rowPopup.innerHTML = `
+    <input type="search" id="per-row-search" placeholder="Search format…" autocomplete="off"
+      class="mb-2 w-full rounded-sm bg-neutral-900 p-2 text-sm" />
+    <div id="per-row-list" class="flex flex-col gap-2"></div>
+  `;
+  document.body.appendChild(rowPopup);
+  document.addEventListener("mousedown", (e) => {
+    if (!rowPopup.contains(e.target) && !e.target.classList.contains("per-row-target-btn")) {
+      rowPopup.classList.add("hidden");
+    }
+  });
+  return rowPopup;
+}
+
+function maybeEnableSubmit() {
+  if (pendingFiles !== 0) return;
+  if (fileNames.length === 0) return;
+  if (isNewUi()) {
+    // require every uploaded file to have a chosen target
+    const allChosen = fileNames.every((f) => fileTargets[f]);
+    convertButton.disabled = !allChosen;
+    formatSelected = allChosen;
+  } else if (formatSelected) {
+    convertButton.disabled = false;
+  }
+}
+
+function renderRowPopup(filename, ext) {
+  const popup = ensureRowPopup();
+  const list = popup.querySelector("#per-row-list");
+  const search = popup.querySelector("#per-row-search");
+  list.innerHTML = `<div class="text-sm text-neutral-400">Loading…</div>`;
+
+  fetchTargetsForExt(ext).then((items) => {
+    if (!items.length) {
+      list.innerHTML = `<div class="text-sm text-neutral-400">No converters available for .${ext}</div>`;
+      return;
+    }
+    // group by converter for readability
+    const byConv = {};
+    for (const it of items) (byConv[it.converter] ||= []).push(it);
+    list.innerHTML = "";
+    for (const [conv, targets] of Object.entries(byConv)) {
+      const group = document.createElement("div");
+      group.className = "border-b border-neutral-700 pb-2";
+      group.innerHTML = `<div class="text-xs text-neutral-400 mb-1">${conv}</div>`;
+      const row = document.createElement("div");
+      row.className = "flex flex-wrap gap-1";
+      for (const t of targets) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className =
+          "rounded-sm bg-neutral-700 px-2 py-1 text-sm hover:bg-neutral-600 target-pick";
+        b.textContent = t.target;
+        b.dataset.value = t.value;
+        b.dataset.target = t.target;
+        b.dataset.converter = t.converter;
+        b.addEventListener("click", () => {
+          fileTargets[filename] = t.value;
+          const rowEl = document.querySelector(`tr[data-filename="${CSS.escape(filename)}"]`);
+          if (rowEl) {
+            const btn = rowEl.querySelector(".per-row-target-btn");
+            if (btn) btn.textContent = `→ ${t.target} (${t.converter})`;
+          }
+          popup.classList.add("hidden");
+          maybeEnableSubmit();
+        });
+        row.appendChild(b);
+      }
+      group.appendChild(row);
+      list.appendChild(group);
+    }
+    const filter = () => {
+      const q = search.value.toLowerCase();
+      for (const btn of list.querySelectorAll(".target-pick")) {
+        btn.style.display = btn.dataset.target.toLowerCase().includes(q) ? "" : "none";
+      }
+    };
+    search.value = "";
+    search.oninput = filter;
+    setTimeout(() => search.focus(), 0);
+  });
+}
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".per-row-target-btn");
+  if (!btn) return;
+  const popup = ensureRowPopup();
+  const rect = btn.getBoundingClientRect();
+  popup.style.top = `${rect.bottom + window.scrollY + 4}px`;
+  popup.style.left = `${Math.max(8, rect.left + window.scrollX - 100)}px`;
+  popup.classList.remove("hidden");
+  renderRowPopup(btn.dataset.filename, btn.dataset.ext);
+});
+
+// ---------- file input change ----------
 fileInput.addEventListener("change", (e) => {
   const files = e.target.files;
-  for (const file of files) {
-    handleFile(file);
-  }
+  for (const file of files) handleFile(file);
 });
 
 const setTitle = () => {
@@ -165,36 +290,32 @@ const setTitle = () => {
   title.textContent = `Convert ${fileType ? `.${fileType}` : ""}`;
 };
 
-// Add a onclick for the delete button
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const deleteRow = (target) => {
-  const filename = target.parentElement.parentElement.children[0].textContent;
-  const row = target.parentElement.parentElement;
-  row.remove();
+  const tr = target.parentElement.parentElement;
+  const filename = tr.dataset.filename || tr.children[0].textContent;
+  tr.remove();
 
-  // remove from fileNames
   const index = fileNames.indexOf(filename);
-  fileNames.splice(index, 1);
+  if (index > -1) fileNames.splice(index, 1);
+  delete fileTargets[filename];
 
-  // reset fileInput
   fileInput.value = "";
 
-  // if fileNames is empty, reset fileType
   if (fileNames.length === 0) {
     fileType = null;
-    fileInput.removeAttribute("accept");
     convertButton.disabled = true;
     setTitle();
   }
 
   fetch(`${webroot}/delete`, {
     method: "POST",
-    body: JSON.stringify({ filename: filename }),
-    headers: {
-      "Content-Type": "application/json",
-    },
+    body: JSON.stringify({ filename }),
+    headers: { "Content-Type": "application/json" },
   }).catch((err) => console.log(err));
+
+  maybeEnableSubmit();
 };
+window.deleteRow = deleteRow;
 
 const uploadFile = (file) => {
   convertButton.disabled = true;
@@ -204,48 +325,43 @@ const uploadFile = (file) => {
   const formData = new FormData();
   formData.append("file", file, file.name);
 
-  let xhr = new XMLHttpRequest();
-
+  const xhr = new XMLHttpRequest();
   xhr.open("POST", `${webroot}/upload`, true);
 
   xhr.onload = () => {
-    let data = JSON.parse(xhr.responseText);
-
     pendingFiles -= 1;
     if (pendingFiles === 0) {
-      if (formatSelected) {
-        convertButton.disabled = false;
-      }
       convertButton.textContent = "Convert";
+      maybeEnableSubmit();
     }
-
-    //Remove the progress bar when upload is done
-    let progressbar = file.htmlRow.getElementsByTagName("progress");
-    progressbar[0].parentElement.remove();
-    console.log(data);
+    const pb = file.htmlRow.getElementsByTagName("progress");
+    if (pb[0]) pb[0].parentElement.remove();
   };
 
   xhr.upload.onprogress = (e) => {
-    let sent = e.loaded;
-    let total = e.total;
-    console.log(`upload progress (${file.name}):`, (100 * sent) / total);
-
-    let progressbar = file.htmlRow.getElementsByTagName("progress");
-    progressbar[0].value = (100 * sent) / total;
+    const pb = file.htmlRow.getElementsByTagName("progress");
+    if (pb[0]) pb[0].value = (100 * e.loaded) / e.total;
   };
 
-  xhr.onerror = (e) => {
-    console.log(e);
-  };
-
+  xhr.onerror = (e) => console.log(e);
   xhr.send(formData);
 };
 
 const formConvert = document.querySelector(`form[action='${webroot}/convert']`);
 
-formConvert.addEventListener("submit", () => {
-  const hiddenInput = document.querySelector("input[name='file_names']");
-  hiddenInput.value = JSON.stringify(fileNames);
+formConvert.addEventListener("submit", (e) => {
+  document.querySelector("input[name='file_names']").value = JSON.stringify(fileNames);
+  if (isNewUi()) {
+    // attach per-file targets; backend prefers this over convert_to when present
+    let hidden = document.querySelector("input[name='file_targets']");
+    if (!hidden) {
+      hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.name = "file_targets";
+      formConvert.appendChild(hidden);
+    }
+    hidden.value = JSON.stringify(fileTargets);
+  }
 });
 
-updateSearchBar();
+wireClassicPicker();

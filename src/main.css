@@ -61,3 +61,13 @@
   font-size: 0.85rem;
   padding: 0.25rem 0.6rem;
 }
+
+/* Per-row target picker column: only meaningful in new-ui. */
+:not(.new-ui) .per-row-target-cell { display: none !important; }
+/* In new-ui we use per-row targets, so the global search bar / popup is
+   redundant — hide them to remove confusion. */
+.new-ui input[name="convert_to_search"] { display: none !important; }
+.new-ui .convert-new-view { display: none !important; }
+
+/* Per-row popup polish */
+#per-row-popup .target-pick { transition: background-color 120ms; }
