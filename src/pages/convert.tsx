@@ -85,8 +85,9 @@ export const convert = new Elysia().use(userService).post(
         return redirect(`${WEBROOT}/`, 302);
       }
     } else {
-      const convertTo = normalizeFiletype(body.convert_to.split(",")[0] ?? "");
-      const converterName = body.convert_to.split(",")[1];
+      const ct = body.convert_to ?? "";
+      const convertTo = normalizeFiletype(ct.split(",")[0] ?? "");
+      const converterName = ct.split(",")[1];
       if (!converterName || isUnsafe(convertTo)) {
         return redirect(`${WEBROOT}/`, 302);
       }
