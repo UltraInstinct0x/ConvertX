@@ -36,7 +36,7 @@
    Server renders both (legacy grouped-by-converter, new grouped-by-category)
    and CSS picks one based on <html class="new-ui">. */
 .new-ui .convert-classic-view { display: none !important; }
-:not(.new-ui) .convert-new-view { display: none !important; }
+html:not(.new-ui) .convert-new-view { display: none !important; }
 
 /* Compact dropzone in new UI: ~50% the height, tighter padding,
    keeps the same look-and-feel as the legacy one. */
@@ -63,7 +63,7 @@
 }
 
 /* Per-row target picker column: only meaningful in new-ui. */
-:not(.new-ui) .per-row-target-cell { display: none !important; }
+html:not(.new-ui) .per-row-target-cell { display: none !important; }
 /* In new-ui we use per-row targets, so the global search bar / popup is
    redundant — hide them to remove confusion. */
 .new-ui input[name="convert_to_search"] { display: none !important; }
