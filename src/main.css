@@ -30,3 +30,34 @@
 @utility btn-secondary {
   @apply bg-neutral-400 text-contrast rounded-sm p-2 sm:p-4 hover:bg-neutral-300 cursor-pointer transition-colors;
 }
+
+/* === New UI overrides === */
+/* Toggle the two render modes for the convert-target chooser.
+   Server renders both (legacy grouped-by-converter, new grouped-by-category)
+   and CSS picks one based on <html class="new-ui">. */
+.new-ui .convert-classic-view { display: none !important; }
+:not(.new-ui) .convert-new-view { display: none !important; }
+
+/* Compact dropzone in new UI: ~50% the height, tighter padding,
+   keeps the same look-and-feel as the legacy one. */
+.new-ui #dropzone {
+  height: 6rem;
+  border-style: solid;
+  border-width: 1px;
+}
+.new-ui #dropzone span { font-size: 0.875rem; }
+
+/* New category-grouped panel styling. */
+.new-ui .category-group { padding: 0.75rem 1rem; }
+.new-ui .category-group header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-500, #f97316);
+  margin-bottom: 0.5rem;
+}
+.new-ui .category-target {
+  font-size: 0.85rem;
+  padding: 0.25rem 0.6rem;
+}

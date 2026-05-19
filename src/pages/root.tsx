@@ -4,6 +4,7 @@ import { Elysia, t } from "elysia";
 import { BaseHtml } from "../components/base";
 import { Header } from "../components/header";
 import { getAllTargets } from "../converters/main";
+import { CATEGORY_ORDER, groupByCategory } from "../helpers/categories";
 import db from "../db/db";
 import { User } from "../db/types";
 import {
@@ -168,10 +169,12 @@ export const root = new Elysia().use(userService).get(
                   class="w-full rounded-sm bg-neutral-800 p-4"
                 />
                 <div class="select_container relative">
+                  {/* Classic: grouped by converter tool */}
                   <article
                     class={`
-                      convert_to_popup absolute z-2 m-0 hidden h-[30vh] max-h-[50vh] w-full flex-col
-                      overflow-x-hidden overflow-y-auto rounded-sm bg-neutral-800
+                      convert_to_popup convert-classic-view absolute z-2 m-0 hidden h-[30vh]
+                      max-h-[50vh] w-full flex-col overflow-x-hidden overflow-y-auto rounded-sm
+                      bg-neutral-800
                       sm:h-[30vh]
                     `}
                   >
@@ -188,7 +191,6 @@ export const root = new Elysia().use(userService).get(
                         <ul class={`convert_to_target flex flex-row flex-wrap gap-1`}>
                           {targets.map((target) => (
                             <button
-                              // https://stackoverflow.com/questions/121499/when-a-blur-event-occurs-how-can-i-find-out-which-element-focus-went-to#comment82388679_33325953
                               tabindex={0}
                               class={`
                                 target rounded-sm bg-neutral-700 p-1 text-base
@@ -206,6 +208,51 @@ export const root = new Elysia().use(userService).get(
                         </ul>
                       </article>
                     ))}
+                  </article>
+
+                  {/* New: grouped by category. Same data, different shape.
+                      Pre-file-upload it shows every category since every
+                      target is theoretically possible from some input. */}
+                  <article
+                    class={`
+                      convert_to_popup convert-new-view absolute z-2 m-0 hidden h-[30vh]
+                      max-h-[50vh] w-full flex-col overflow-x-hidden overflow-y-auto rounded-sm
+                      bg-neutral-800
+                      sm:h-[40vh]
+                    `}
+                  >
+                    {CATEGORY_ORDER.map((cat) => {
+                      const items = groupByCategory(getAllTargets())[cat];
+                      if (!items || items.length === 0) return null;
+                      return (
+                        <article
+                          class={`category-group convert_to_group flex w-full flex-col border-b border-neutral-700`}
+                          data-category={cat}
+                        >
+                          <header class="mb-2 w-full" safe>
+                            {cat}
+                          </header>
+                          <ul class={`convert_to_target flex flex-row flex-wrap gap-1`}>
+                            {items.map(({ target, converter }) => (
+                              <button
+                                tabindex={0}
+                                class={`
+                                  target category-target rounded-sm bg-neutral-700
+                                  hover:bg-neutral-600
+                                `}
+                                data-value={`${target},${converter}`}
+                                data-target={target}
+                                data-converter={converter}
+                                type="button"
+                                safe
+                              >
+                                {target}
+                              </button>
+                            ))}
+                          </ul>
+                        </article>
+                      );
+                    })}
                   </article>
 
                   {/* Hidden element which determines the format to convert the file too and the converter to use */}

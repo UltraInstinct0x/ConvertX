@@ -11,10 +11,31 @@ export const Header = ({
   hideHistory?: boolean;
   webroot?: string;
 }) => {
+  // New-UI toggle: button reads/writes localStorage and reloads to apply.
+  // Stable across sessions; legacy is the default.
+  const uiToggle = (
+    <li>
+      <button
+        type="button"
+        id="ui-toggle"
+        data-ui-toggle
+        title="Toggle new UI"
+        class={`
+          rounded-sm border border-neutral-700 px-2 py-1 text-xs uppercase
+          tracking-wider text-neutral-300 transition-all
+          hover:border-accent-500 hover:text-accent-500
+        `}
+      >
+        <span data-ui-toggle-label>UI: classic</span>
+      </button>
+    </li>
+  );
+
   let rightNav: JSX.Element;
   if (loggedIn) {
     rightNav = (
-      <ul class="flex gap-4">
+      <ul class="flex items-center gap-4">
+        {uiToggle}
         {!hideHistory && (
           <li>
             <a
@@ -58,7 +79,8 @@ export const Header = ({
     );
   } else {
     rightNav = (
-      <ul class="flex gap-4">
+      <ul class="flex items-center gap-4">
+        {uiToggle}
         <li>
           <a
             class={`

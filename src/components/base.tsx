@@ -20,6 +20,28 @@ export const BaseHtml = ({
       <link rel="icon" type="image/png" sizes="32x32" href={`${webroot}/favicon-32x32.png`} />
       <link rel="icon" type="image/png" sizes="16x16" href={`${webroot}/favicon-16x16.png`} />
       <link rel="manifest" href={`${webroot}/site.webmanifest`} />
+      {/* Apply UI preference before paint to avoid FOUC, then keep the
+          header toggle label in sync once it mounts. */}
+      <script>{`
+        (function(){
+          try {
+            var mode = localStorage.getItem('convertx-ui') || 'classic';
+            if (mode === 'new') document.documentElement.classList.add('new-ui');
+          } catch(e) {}
+          document.addEventListener('DOMContentLoaded', function(){
+            var btn = document.querySelector('[data-ui-toggle]');
+            var label = document.querySelector('[data-ui-toggle-label]');
+            if (!btn || !label) return;
+            var mode = document.documentElement.classList.contains('new-ui') ? 'new' : 'classic';
+            label.textContent = 'UI: ' + mode;
+            btn.addEventListener('click', function(){
+              var next = document.documentElement.classList.contains('new-ui') ? 'classic' : 'new';
+              try { localStorage.setItem('convertx-ui', next); } catch(e) {}
+              location.reload();
+            });
+          });
+        })();
+      `}</script>
     </head>
     <body class={`flex min-h-screen w-full flex-col bg-neutral-900 text-neutral-200`}>
       {children}
