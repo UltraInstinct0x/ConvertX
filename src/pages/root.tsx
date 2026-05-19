@@ -283,7 +283,7 @@ export const root = new Elysia().use(userService).get(
               />
             </form>
           </main>
-          <script src="script.js" defer />
+          <script src={`script.js?v=${Date.now()}`} defer />
         </>
       </BaseHtml>
     );
