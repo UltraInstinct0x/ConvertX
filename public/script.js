@@ -11,6 +11,40 @@ let formatSelected = false;
 
 const isNewUi = () => document.documentElement.classList.contains("new-ui");
 
+// ---------- category map (mirror of src/helpers/categories.ts) ----------
+// Kept duplicated client-side so the per-row popup can filter by input category
+// without an extra round-trip. If you add a category server-side, mirror it here.
+const CAT_EXTS = {
+  Image: ["jpg","jpeg","png","gif","webp","bmp","tiff","tif","avif","heic","heif","jxl","ico","tga","pbm","pgm","ppm","pnm","exr","hdr","dds","psd","xcf","raw","cr2","nef","arw","dng","rw2","orf","raf","pcx","sgi","xpm"],
+  Video: ["mp4","mov","mkv","avi","webm","wmv","flv","m4v","mpg","mpeg","3gp","ogv","ts","vob","asf","rm","rmvb","f4v"],
+  Audio: ["mp3","wav","flac","aac","ogg","m4a","opus","wma","aiff","aif","ac3","amr","au","mka","oga","voc","caf"],
+  Vector: ["svg","eps","ai","emf","wmf","cgm","dxf"],
+  Document: ["pdf","doc","docx","odt","txt","md","rtf","html","htm","tex","rst","epub","fodt","ott","uot","wps","abw","lwp","pages","key","ppt","pptx","odp","fodp","otp","xls","xlsx","ods","fods","ots","csv","tsv","msg","eml","vcf","ics"],
+  Ebook: ["mobi","azw","azw3","azw4","fb2","lit","lrf","pdb","kfx","kepub","snb","pml","rb","tcr","txtz"],
+  "3D": ["obj","stl","ply","fbx","dae","gltf","glb","3ds","blend","x3d","amf","off","x","iqe","iqm","md2","md3","md5"],
+  Data: ["json","yaml","yml","xml","toml","ini","hcl"],
+  Archive: ["zip","tar","gz","bz2","7z","rar","xz","zst"],
+};
+const EXT_TO_CAT = {};
+for (const [cat, exts] of Object.entries(CAT_EXTS)) for (const e of exts) EXT_TO_CAT[e] = cat;
+const catFor = (ext) => EXT_TO_CAT[(ext || "").toLowerCase().replace(/^\./, "")] || "Other";
+
+// Sensible output categories given an input category. Power users can flip
+// the "show all" switch in the popup to bypass this.
+const SENSIBLE = {
+  Image:    ["Image", "Vector", "Document"],
+  Vector:   ["Vector", "Image", "Document"],
+  Video:    ["Video", "Audio", "Image"],     // image = frame extract
+  Audio:    ["Audio"],
+  Document: ["Document", "Image", "Ebook", "Data"],
+  Ebook:    ["Ebook", "Document"],
+  "3D":     ["3D", "Image"],
+  Data:     ["Data", "Document"],
+  Archive:  ["Archive"],
+  Other:    null, // null = show all
+};
+const sensibleFor = (inputCat) => SENSIBLE[inputCat] ?? null;
+
 // File-input "accept" used to be locked to the first dropped extension, which
 // silently rejected every other type. Leave it open so the user can mix files.
 // (The backend still validates per-converter, so nothing actually breaks.)
@@ -79,6 +113,7 @@ function handleFile(file) {
   fileList.appendChild(row);
   file.htmlRow = row;
   fileNames.push(file.name);
+  setTitle(); // refresh after every add — handles mixed-type batches
   uploadFile(file);
 }
 
@@ -200,6 +235,10 @@ function ensureRowPopup() {
   rowPopup.innerHTML = `
     <input type="search" id="per-row-search" placeholder="Search format…" autocomplete="off"
       class="mb-2 w-full rounded-sm bg-neutral-900 p-2 text-sm" />
+    <label class="mb-2 flex items-center gap-2 text-xs text-neutral-400 select-none">
+      <input type="checkbox" id="per-row-showall" class="accent-accent-500" />
+      Show all formats (incl. unusual conversions)
+    </label>
     <div id="per-row-list" class="flex flex-col gap-2"></div>
   `;
   document.body.appendChild(rowPopup);
@@ -228,63 +267,80 @@ function renderRowPopup(filename, ext) {
   const popup = ensureRowPopup();
   const list = popup.querySelector("#per-row-list");
   const search = popup.querySelector("#per-row-search");
+  const showAll = popup.querySelector("#per-row-showall");
   list.innerHTML = `<div class="text-sm text-neutral-400">Loading…</div>`;
+
+  const inputCat = catFor(ext);
+  const allowed = sensibleFor(inputCat); // null = no filter
 
   fetchTargetsForExt(ext).then((items) => {
     if (!items.length) {
       list.innerHTML = `<div class="text-sm text-neutral-400">No converters available for .${ext}</div>`;
       return;
     }
-    // Group by category (Image / Video / Audio / …) — the whole point of new UI.
-    const byCat = {};
-    for (const it of items) (byCat[it.category || "Other"] ||= []).push(it);
+
     const order = ["Image", "Video", "Audio", "Document", "Vector", "Ebook", "3D", "Data", "Archive", "Other"];
-    list.innerHTML = "";
-    for (const cat of order) {
-      const targets = byCat[cat];
-      if (!targets || !targets.length) continue;
-      const group = document.createElement("div");
-      group.className = "border-b border-neutral-700 pb-2";
-      const head = document.createElement("div");
-      head.className = "text-xs font-semibold uppercase tracking-wider mb-1";
-      head.style.color = "var(--accent-500, #f97316)";
-      head.textContent = cat;
-      group.appendChild(head);
-      const row = document.createElement("div");
-      row.className = "flex flex-wrap gap-1";
-      for (const t of targets) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className =
-          "rounded-sm bg-neutral-700 px-2 py-1 text-sm hover:bg-neutral-600 target-pick";
-        b.textContent = t.target;
-        b.title = `via ${t.converter}`;
-        b.dataset.value = t.value;
-        b.dataset.target = t.target;
-        b.dataset.converter = t.converter;
-        b.addEventListener("click", () => {
-          fileTargets[filename] = t.value;
-          const rowEl = document.querySelector(`tr[data-filename="${CSS.escape(filename)}"]`);
-          if (rowEl) {
-            const btn = rowEl.querySelector(".per-row-target-btn");
-            if (btn) btn.textContent = `→ .${t.target}`;
-          }
-          popup.classList.add("hidden");
-          maybeEnableSubmit();
-        });
-        row.appendChild(b);
+
+    const render = () => {
+      const includeAll = showAll.checked || !allowed;
+      const filtered = includeAll ? items : items.filter((it) => allowed.includes(it.category || "Other"));
+      const byCat = {};
+      for (const it of filtered) (byCat[it.category || "Other"] ||= []).push(it);
+      list.innerHTML = "";
+      if (!filtered.length) {
+        list.innerHTML = `<div class="text-sm text-neutral-400">No common targets for .${ext}. Toggle "Show all" for the full list.</div>`;
+        return;
       }
-      group.appendChild(row);
-      list.appendChild(group);
-    }
-    const filter = () => {
-      const q = search.value.toLowerCase();
-      for (const btn of list.querySelectorAll(".target-pick")) {
-        btn.style.display = btn.dataset.target.toLowerCase().includes(q) ? "" : "none";
+      for (const cat of order) {
+        const targets = byCat[cat];
+        if (!targets || !targets.length) continue;
+        const group = document.createElement("div");
+        group.className = "border-b border-neutral-700 pb-2";
+        const head = document.createElement("div");
+        head.className = "text-xs font-semibold uppercase tracking-wider mb-1";
+        head.style.color = "var(--accent-500, #f97316)";
+        head.textContent = cat;
+        group.appendChild(head);
+        const row = document.createElement("div");
+        row.className = "flex flex-wrap gap-1";
+        for (const t of targets) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className =
+            "rounded-sm bg-neutral-700 px-2 py-1 text-sm hover:bg-neutral-600 target-pick";
+          b.textContent = t.target;
+          b.title = `via ${t.converter}`;
+          b.dataset.value = t.value;
+          b.dataset.target = t.target;
+          b.dataset.converter = t.converter;
+          b.addEventListener("click", () => {
+            fileTargets[filename] = t.value;
+            const rowEl = document.querySelector(`tr[data-filename="${CSS.escape(filename)}"]`);
+            if (rowEl) {
+              const btn = rowEl.querySelector(".per-row-target-btn");
+              if (btn) btn.textContent = `→ .${t.target}`;
+            }
+            popup.classList.add("hidden");
+            maybeEnableSubmit();
+          });
+          row.appendChild(b);
+        }
+        group.appendChild(row);
+        list.appendChild(group);
       }
+      const filter = () => {
+        const q = search.value.toLowerCase();
+        for (const btn of list.querySelectorAll(".target-pick")) {
+          btn.style.display = btn.dataset.target.toLowerCase().includes(q) ? "" : "none";
+        }
+      };
+      search.oninput = filter;
     };
+
+    showAll.checked = false;
+    showAll.onchange = render;
+    render();
     search.value = "";
-    search.oninput = filter;
     setTimeout(() => search.focus(), 0);
   });
 }
@@ -308,7 +364,19 @@ fileInput.addEventListener("change", (e) => {
 
 const setTitle = () => {
   const title = document.querySelector("h1");
-  title.textContent = `Convert ${fileType ? `.${fileType}` : ""}`;
+  // Title shows the input ext only when every queued file shares one.
+  // Mixed batches collapse to a plain "Convert" so it stops lying about .png.
+  const exts = new Set();
+  for (const tr of document.querySelectorAll("#file-list tr[data-ext]")) {
+    exts.add(tr.dataset.ext);
+  }
+  if (exts.size === 1) {
+    title.textContent = `Convert .${[...exts][0]}`;
+  } else if (exts.size > 1) {
+    title.textContent = `Convert ${exts.size} file types`;
+  } else {
+    title.textContent = "Convert";
+  }
 };
 
 const deleteRow = (target) => {
@@ -322,10 +390,10 @@ const deleteRow = (target) => {
 
   fileInput.value = "";
 
+  setTitle(); // recompute after every removal — drops .png if last png is gone
   if (fileNames.length === 0) {
     fileType = null;
     convertButton.disabled = true;
-    setTitle();
   }
 
   fetch(`${webroot}/delete`, {
