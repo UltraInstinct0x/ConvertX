@@ -164,14 +164,27 @@ async function fetchTargetsForExt(ext) {
     headers: { "Content-Type": "application/json" },
   });
   const html = await res.text();
-  // Parse out target buttons from returned fragment.
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
-  const items = Array.from(tmp.querySelectorAll(".target")).map((btn) => ({
-    target: btn.dataset.target,
-    converter: btn.dataset.converter,
-    value: btn.dataset.value,
-  }));
+  // Scope to the new-view container so we don't get duplicates from the
+  // classic view (server renders both). Each item also carries its
+  // category from the parent .category-group's data-category.
+  const items = [];
+  const seen = new Set();
+  for (const group of tmp.querySelectorAll(".convert-new-view .category-group")) {
+    const category = group.dataset.category || "Other";
+    for (const btn of group.querySelectorAll(".target")) {
+      const key = `${btn.dataset.target}|${btn.dataset.converter}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        target: btn.dataset.target,
+        converter: btn.dataset.converter,
+        value: btn.dataset.value,
+        category,
+      });
+    }
+  }
   newUiTargetCache[ext] = items;
   return items;
 }
@@ -222,14 +235,21 @@ function renderRowPopup(filename, ext) {
       list.innerHTML = `<div class="text-sm text-neutral-400">No converters available for .${ext}</div>`;
       return;
     }
-    // group by converter for readability
-    const byConv = {};
-    for (const it of items) (byConv[it.converter] ||= []).push(it);
+    // Group by category (Image / Video / Audio / …) — the whole point of new UI.
+    const byCat = {};
+    for (const it of items) (byCat[it.category || "Other"] ||= []).push(it);
+    const order = ["Image", "Video", "Audio", "Document", "Vector", "Ebook", "3D", "Data", "Archive", "Other"];
     list.innerHTML = "";
-    for (const [conv, targets] of Object.entries(byConv)) {
+    for (const cat of order) {
+      const targets = byCat[cat];
+      if (!targets || !targets.length) continue;
       const group = document.createElement("div");
       group.className = "border-b border-neutral-700 pb-2";
-      group.innerHTML = `<div class="text-xs text-neutral-400 mb-1">${conv}</div>`;
+      const head = document.createElement("div");
+      head.className = "text-xs font-semibold uppercase tracking-wider mb-1";
+      head.style.color = "var(--accent-500, #f97316)";
+      head.textContent = cat;
+      group.appendChild(head);
       const row = document.createElement("div");
       row.className = "flex flex-wrap gap-1";
       for (const t of targets) {
@@ -238,6 +258,7 @@ function renderRowPopup(filename, ext) {
         b.className =
           "rounded-sm bg-neutral-700 px-2 py-1 text-sm hover:bg-neutral-600 target-pick";
         b.textContent = t.target;
+        b.title = `via ${t.converter}`;
         b.dataset.value = t.value;
         b.dataset.target = t.target;
         b.dataset.converter = t.converter;
@@ -246,7 +267,7 @@ function renderRowPopup(filename, ext) {
           const rowEl = document.querySelector(`tr[data-filename="${CSS.escape(filename)}"]`);
           if (rowEl) {
             const btn = rowEl.querySelector(".per-row-target-btn");
-            if (btn) btn.textContent = `→ ${t.target} (${t.converter})`;
+            if (btn) btn.textContent = `→ .${t.target}`;
           }
           popup.classList.add("hidden");
           maybeEnableSubmit();
